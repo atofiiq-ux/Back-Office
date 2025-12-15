@@ -1,0 +1,1131 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>L.B & WA Follow-up (Supabase Ready)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Readex+Pro:wght@300;400;500;700&display=swap" rel="stylesheet">
+
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+
+    <script>
+        // --- إعدادات Supabase ---
+        const SUPABASE_URL = 'https://mybrmochnnrefrzawpgy.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im15YnJtb2Nobm5yZWZyemF3cGd5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU3Mzk3MDgsImV4cCI6MjA4MTMxNTcwOH0.AVOaFIPAthz-GJgvmwj0IkQ9gPDWgUsxD4gKjVscQds';
+
+        // تهيئة العميل
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        const TABLE_NAME = 'backoffice';
+        const ROW_ID = 1;
+
+        // --- طبقة التوافق (Compatibility Layer) ---
+        window.currentData = {};
+
+        window.ref = function (db, path) {
+            return path || '/';
+        };
+
+        async function syncWithSupabase(updates) {
+            let currentLocalData = JSON.parse(JSON.stringify(window.currentData));
+
+            for (let path in updates) {
+                const keys = path.split('/').filter(k => k);
+                let ptr = currentLocalData;
+
+                for (let i = 0; i < keys.length - 1; i++) {
+                    if (!ptr[keys[i]]) ptr[keys[i]] = {};
+                    ptr = ptr[keys[i]];
+                }
+
+                const lastKey = keys[keys.length - 1];
+                if (updates[path] === null) {
+                    delete ptr[lastKey];
+                } else {
+                    ptr[lastKey] = updates[path];
+                }
+            }
+
+            window.currentData = currentLocalData;
+
+            const { error } = await supabase
+                .from(TABLE_NAME)
+                .update({ data: window.currentData })
+                .eq('id', ROW_ID);
+
+            if (error) {
+                console.error("Error saving:", error);
+                window.logStatus(`Error: ${error.message}`, "red");
+            } else {
+                window.logStatus("● Data Synced Successfully", "green");
+            }
+        }
+
+        window.update = function (ref, updatesObj) {
+            syncWithSupabase(updatesObj);
+        };
+
+        window.set = function (ref, value) {
+            let updates = {};
+            updates[ref] = value;
+            return syncWithSupabase(updates);
+        };
+
+        window.remove = function (ref) {
+            let updates = {};
+            updates[ref] = null;
+            syncWithSupabase(updates);
+        };
+
+        window.get = async function (ref) {
+            return { val: () => window.currentData };
+        };
+
+        function startSupabaseListener(callback) {
+            supabase.from(TABLE_NAME).select('data').eq('id', ROW_ID).single()
+                .then(({ data, error }) => {
+                    if (error) {
+                        console.error("Error fetching initial data:", error);
+                        window.logStatus(`Connection Error: ${error.message}`, "red");
+                        return;
+                    }
+                    if (data && data.data) {
+                        window.currentData = data.data;
+                        callback({ val: () => data.data });
+                        window.logStatus("● System Online", "green");
+                    }
+                }).catch(e => {
+                    window.logStatus("Fatal Error: Check Console.", "red");
+                    console.error(e);
+                });
+
+            supabase.channel('public:backoffice')
+                .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: TABLE_NAME, filter: `id=eq.${ROW_ID}` }, payload => {
+                    const newData = payload.new.data;
+                    window.currentData = newData;
+                    callback({ val: () => newData });
+                    window.logStatus("● Realtime Update Received", "green");
+                })
+                .subscribe();
+        }
+
+        window.onValue = function (ref, callback) {
+            startSupabaseListener(callback);
+        };
+
+        // دالة عرض الحالة الجديدة (في الأعلى)
+        window.logStatus = function (msg, color = 'white') {
+            const el = document.getElementById('status-badge');
+            if (el) {
+                el.innerText = msg;
+                // ألوان نيون هادئة مناسبة للخلفية الداكنة
+                el.style.color = color === 'green' ? '#4ade80' : (color === 'red' ? '#ff5c5c' : '#aaaaaa');
+                el.style.textShadow = color === 'green' ? '0 0 10px rgba(74, 222, 128, 0.3)' : 'none';
+            }
+        };
+    </script>
+
+    <style>
+        :root {
+            --bg-dark: #000000;
+            --text-main: #ffffff;
+            --text-secondary: #e0e0e0;
+            --danger: #ff3b30;
+            --success: #34c759;
+            --accent: #0a84ff;
+            --purple: #bf5af2;
+        }
+
+        body {
+            font-family: 'Readex Pro', sans-serif;
+            background-color: #0f0c29;
+            background-image: radial-gradient(at 0% 0%, hsla(253, 16%, 7%, 1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(225, 39%, 30%, 1) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339, 49%, 30%, 1) 0, transparent 50%);
+            background-attachment: fixed;
+            background-size: cover;
+            color: var(--text-main);
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            overflow-x: hidden;
+            padding-bottom: 60px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 950px;
+            background: rgba(20, 20, 30, 0.6);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 30px;
+            padding: 40px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            margin-top: 30px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        h1 {
+            margin: 0;
+            font-weight: 700;
+            font-size: 2.2rem;
+            color: #fff;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .date-badge {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 5px 20px;
+            border-radius: 50px;
+            font-size: 0.9rem;
+            color: #ddd;
+            margin-top: 10px;
+            font-weight: 500;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* تنسيق مؤشر الحالة الجديد في الأعلى */
+        .status-badge-top {
+            display: block;
+            font-size: 0.8rem;
+            margin-top: 8px;
+            color: #aaa;
+            font-weight: 300;
+            transition: color 0.3s ease;
+        }
+
+        .segmented-control {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 5px;
+            border-radius: 18px;
+            width: fit-content;
+            margin: 0 auto 35px auto;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            gap: 5px;
+        }
+
+        .segment-btn {
+            padding: 10px 20px;
+            border: none;
+            background: transparent;
+            font-size: 0.95rem;
+            font-family: inherit;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.6);
+            cursor: pointer;
+            border-radius: 14px;
+            transition: 0.3s;
+        }
+
+        .segment-btn.active {
+            background: rgba(255, 255, 255, 0.15);
+            color: #fff;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            font-weight: 600;
+        }
+
+        .section {
+            display: none;
+            animation: fadeIn 0.4s ease;
+        }
+
+        .section.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .content-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 24px;
+            padding: 30px;
+            margin-bottom: 25px;
+        }
+
+        h2 {
+            font-size: 1.4rem;
+            margin-top: 0;
+            margin-bottom: 20px;
+            color: #fff;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 10px;
+        }
+
+        .hint-text {
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 0.9rem;
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
+        .names-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        .name-chip {
+            padding: 10px 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(5px);
+            border-radius: 14px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: 0.2s;
+            color: rgba(255, 255, 255, 0.8);
+            user-select: none;
+        }
+
+        .name-chip:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .name-chip.selected {
+            background: var(--accent);
+            color: white;
+            border-color: var(--accent);
+            box-shadow: 0 0 15px rgba(10, 132, 255, 0.4);
+        }
+
+        .black-btn {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #3a3a3a, #1a1a1a);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 18px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+            font-family: inherit;
+            margin-top: 15px;
+        }
+
+        .black-btn:active {
+            transform: scale(0.98);
+        }
+
+        .btn-generate {
+            background: linear-gradient(135deg, var(--purple), #5e35b1);
+        }
+
+        .btn-danger {
+            background: rgba(255, 69, 58, 0.2);
+            color: var(--danger);
+            border-color: rgba(255, 69, 58, 0.3);
+        }
+
+        .glass-input {
+            width: 100%;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.5);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 18px;
+            font-size: 1rem;
+            font-weight: 500;
+            outline: none;
+            text-align: center;
+            font-family: inherit;
+            cursor: pointer;
+        }
+
+        .glass-input::-webkit-calendar-picker-indicator {
+            filter: invert(1);
+            cursor: pointer;
+        }
+
+        .selected-day-display {
+            text-align: center;
+            color: var(--accent);
+            margin-top: 10px;
+            font-weight: bold;
+            font-size: 1rem;
+        }
+
+        .result-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        .result-table th {
+            text-align: right;
+            padding: 15px;
+            color: rgba(255, 255, 255, 0.5);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .result-table td {
+            padding: 15px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            color: #fff;
+        }
+
+        .duration-badge {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+        }
+
+        .cycle-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            font-size: 0.95rem;
+        }
+
+        .cycle-table th {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 12px;
+            color: #ddd;
+            text-align: center;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .cycle-table td {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 12px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .cycle-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .today-row td {
+            background: rgba(50, 215, 75, 0.15) !important;
+            border: 1px solid var(--success);
+            color: #fff;
+            font-weight: bold;
+        }
+
+        .tag {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            margin: 2px;
+        }
+
+        .tag-t1 {
+            background: rgba(10, 132, 255, 0.2);
+            color: #64d2ff;
+        }
+
+        .tag-t2 {
+            background: rgba(191, 90, 242, 0.2);
+            color: #e4a3ff;
+        }
+
+        .slots-wrapper {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 15px;
+        }
+
+        .slot-card {
+            background: #ffffff;
+            border: 1px solid #ddd;
+            padding: 20px;
+            border-radius: 20px;
+            text-align: center;
+            color: #000;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .slot-card .slot-time {
+            font-size: 1.3rem;
+            font-weight: 800;
+            margin-bottom: 10px;
+            display: block;
+            color: #000;
+        }
+
+        .slot-card.full {
+            opacity: 0.6;
+            background: #f0f0f0;
+            border-color: #ccc;
+        }
+
+        .book-btn-small {
+            width: 100%;
+            padding: 10px;
+            border-radius: 12px;
+            border: none;
+            margin-top: 10px;
+            font-weight: 700;
+            cursor: pointer;
+            background: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #c8e6c9;
+        }
+
+        .book-btn-small:hover {
+            background: #c8e6c9;
+        }
+
+        .book-btn-small:disabled {
+            background: #eee;
+            color: #999;
+            border: 1px solid #ddd;
+            cursor: not-allowed;
+        }
+
+        .booked-name {
+            display: inline-block;
+            background: #333;
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            margin: 2px;
+            color: #fff;
+        }
+
+        .leave-item {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 15px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .leave-info span {
+            display: block;
+        }
+
+        .leave-name {
+            font-weight: bold;
+            color: var(--accent);
+            font-size: 1.1rem;
+        }
+
+        .leave-date {
+            color: #ccc;
+            font-size: 0.9rem;
+        }
+
+        .countdown-timer {
+            text-align: center;
+            font-size: 1.1rem;
+            color: #ff9f0a;
+            font-weight: bold;
+            margin: 15px 0;
+            background: rgba(255, 159, 10, 0.1);
+            padding: 10px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 159, 10, 0.2);
+            display: none;
+        }
+
+        .admin-lock {
+            position: absolute;
+            top: 25px;
+            left: 25px;
+            cursor: pointer;
+            opacity: 0.3;
+            transition: 0.3s;
+        }
+
+        .admin-lock:hover {
+            opacity: 1;
+            transform: scale(1.1);
+        }
+
+        .admin-controls {
+            display: none;
+            margin-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            padding-top: 15px;
+        }
+
+        body.admin-mode .admin-controls {
+            display: block;
+        }
+
+        .delete-x {
+            color: #ff3b30;
+            cursor: pointer;
+            margin-right: 5px;
+            font-weight: bold;
+            padding: 0 5px;
+            display: none !important;
+        }
+
+        body.admin-mode .delete-x {
+            display: inline-block !important;
+        }
+
+        .delete-x:hover {
+            color: #ff0000;
+            transform: scale(1.2);
+        }
+
+        .copy-btn {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .copyright {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 0.85rem;
+            font-weight: 300;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <div class="admin-lock" onclick="toggleAdmin()">🔒</div>
+        <header>
+            <h1>L.B & WA Follow-up</h1>
+            <div class="date-badge" id="currentDate"></div>
+            <div id="status-badge" class="status-badge-top">Connecting...</div>
+        </header>
+
+        <div class="segmented-control">
+            <button class="segment-btn active" onclick="switchTab('whatsapp')">توزيع الواتساب</button>
+            <button class="segment-btn" onclick="switchTab('breaks')">حجز الاستراحة</button>
+            <button class="segment-btn" onclick="switchTab('leaves')">الإجازات</button>
+            <button class="segment-btn" onclick="switchTab('schedule')">جدول المهام</button>
+        </div>
+
+        <div id="whatsapp" class="section active">
+            <div id="waControls" class="content-card">
+                <h2>الحضور اليوم</h2>
+                <p class="hint-text">اختر الموظفين الحاضرين للقرعة</p>
+                <div class="names-grid" id="waNamesGrid"></div>
+                <button class="black-btn" onclick="runLottery()">🎲 إجراء القرعة وتوزيع الوقت</button>
+            </div>
+
+            <div id="waResults" class="content-card" style="display: none;">
+                <div style="text-align: center; color: var(--success); font-weight: 600; margin-bottom: 20px;">✓ تم
+                    اعتماد الجدول</div>
+                <div id="waCountdown" class="countdown-timer"></div>
+                <table class="result-table">
+                    <tbody id="waTableBody"></tbody>
+                </table>
+                <button class="black-btn copy-btn" onclick="copyTableToClipboard()">📋 نسخ النص</button>
+                <div class="admin-controls">
+                    <button class="black-btn btn-danger" onclick="adminResetWhatsApp()">⚠️ (Admin) حذف الجدول</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="breaks" class="section">
+            <div class="content-card">
+                <h2>حجز الاستراحة</h2>
+                <p class="hint-text">اختر اسمك ثم الوقت (مسموح باختيار واحد)</p>
+                <div class="names-grid" id="breakNamesGrid"></div>
+                <div id="breakCountdown" class="countdown-timer"></div>
+                <hr style="margin: 25px 0; border: 0; border-top: 1px solid rgba(255,255,255,0.1);">
+                <div class="slots-wrapper" id="breakSlots"></div>
+            </div>
+        </div>
+
+        <div id="leaves" class="section">
+            <div class="content-card">
+                <h2>حجز إجازة</h2>
+                <p class="hint-text">اختر اسمك وتاريخ الإجازة</p>
+                <div class="names-grid" id="leaveNamesGrid"></div>
+                <div style="margin-top: 20px;">
+                    <input type="date" id="leaveDate" class="glass-input">
+                    <div id="selectedDayDisplay" class="selected-day-display"></div>
+                </div>
+                <button class="black-btn" onclick="bookLeave()">📝 تسجيل الإجازة</button>
+            </div>
+            <div class="content-card">
+                <h2>الإجازات القادمة</h2>
+                <div id="leavesList"></div>
+            </div>
+        </div>
+
+        <div id="schedule" class="section">
+            <div class="content-card">
+                <h2>جدول المهام</h2>
+                <p class="hint-text">يتم توزيع المهام تلقائياً مع مراعاة الأوفات والإجازات</p>
+                <p class="hint-text">Escalation = Joget , In progres , Waiting , Email</p>
+                <div id="cycleDisplay" style="display:none;">
+                    <div style="overflow-x:auto;">
+                        <table class="cycle-table">
+                            <thead>
+                                <tr>
+                                    <th>التاريخ</th>
+                                    <th>Escalation</th>
+                                    <th>Contract Feedback</th>
+                                    <th>Backup</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cycleTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="generateCycleBtn">
+                    <button class="black-btn btn-generate" onclick="generateCycle()">🔄 إنشاء دورة جديدة</button>
+                </div>
+
+                <div class="admin-controls">
+                    <button class="black-btn btn-danger" onclick="deleteCycle()">⚠️ (Admin) حذف الدورة الحالية</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="copyright">
+            Mustafa Shakir © 2025
+        </div>
+
+    </div>
+
+    <script>
+        const employees = ["ريام", "نرجس", "زهراء", "سجاد", "الحسن", "عبدالله نجم", "عبدالله العبيدي", "ابراهيم", "محمد", "مصطفى", "شاكر"];
+
+        const offDays = {
+            "ريام": [5, 6], "محمد": [5, 6],
+            "الحسن": [6, 0],
+            "مصطفى": [0, 1], "نرجس": [0, 1],
+            "سجاد": [1, 2],
+            "شاكر": [2, 3], "عبدالله نجم": [2, 3],
+            "زهراء": [4, 5], "ابراهيم": [4, 5],
+            "عبدالله العبيدي": []
+        };
+
+        const breakTimes = [
+            { id: 1, time: "12:00 - 12:40" }, { id: 2, time: "12:40 - 01:20" },
+            { id: 3, time: "01:20 - 02:00" }, { id: 4, time: "02:00 - 02:40" },
+            { id: 5, time: "02:40 - 03:20" }, { id: 6, time: "03:20 - 04:00" }
+        ];
+
+        let selectedBreakUser = null;
+        let selectedLeaveUser = null;
+        let waInterval = null;
+        let brInterval = null;
+
+        setTimeout(() => { initApp(); }, 500);
+
+        function initApp() {
+            document.getElementById('currentDate').innerText = new Date().toLocaleDateString('ar-IQ');
+            setupUI();
+
+            document.getElementById('leaveDate').addEventListener('change', function () {
+                const val = this.value;
+                if (val) {
+                    const d = new Date(val);
+                    const days = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+                    const dayName = days[d.getDay()];
+                    document.getElementById('selectedDayDisplay').innerText = `اليوم: ${dayName}`;
+                } else {
+                    document.getElementById('selectedDayDisplay').innerText = '';
+                }
+            });
+
+            // Start Supabase Listener (This replaces onValue)
+            window.onValue('root', (snapshot) => {
+                const data = snapshot.val() || {};
+
+                checkDailyReset(data); // 🟢 CHECK RESET ON LOAD
+
+                updateWaUI(data.waSchedule, data.waDone);
+                updateBreakUI(data.breakBookings || {});
+                updateLeavesUI(data.leaves || {});
+                renderCycle(data.cycleSchedule);
+
+                window.currentData = data; // Keep local copy up to date
+                window.logStatus("● System Online", "green");
+            });
+
+            // Start Global Timer for 7:30 Check
+            startGlobalCountdown();
+        }
+
+        // --- ⏰ DAILY RESET LOGIC (7:30 AM Baghdad) ---
+        function getBaghdadDate() {
+            return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Baghdad" }));
+        }
+
+        function checkDailyReset(data) {
+            const now = getBaghdadDate();
+
+            // Determine "Cycle Date" (The date of the current or last passed 7:30 AM)
+            let cycleDate = new Date(now);
+            cycleDate.setHours(7, 30, 0, 0);
+
+            // If current time is BEFORE 7:30 AM, the cycle belongs to Yesterday
+            if (now < cycleDate) {
+                cycleDate.setDate(cycleDate.getDate() - 1);
+            }
+
+            const cycleDateString = cycleDate.toISOString().split('T')[0]; // Format YYYY-MM-DD
+
+            // Check if stored data belongs to an OLD cycle
+            if (data.lastResetDate !== cycleDateString) {
+                console.log("⏰ New Day Detected (7:30 AM passed). Resetting...");
+
+                const updates = {};
+                // Reset WA
+                updates['/waSchedule'] = null;
+                updates['/waDone'] = false;
+
+                // Reset Breaks
+                updates['/breakBookings'] = null;
+
+                // Update Reset Date
+                updates['/lastResetDate'] = cycleDateString;
+
+                // Cleanup Leaves (Past Dates)
+                if (data.leaves) {
+                    const todayStr = new Date().toISOString().split('T')[0];
+                    for (let key in data.leaves) {
+                        if (data.leaves[key].date < todayStr) {
+                            updates[`/leaves/${key}`] = null;
+                        }
+                    }
+                }
+
+                window.update('root', updates);
+            }
+        }
+
+        // --- UI Setup ---
+        function setupUI() {
+            const waGrid = document.getElementById('waNamesGrid'); waGrid.innerHTML = '';
+            employees.forEach(n => {
+                let d = document.createElement('div'); d.className = 'name-chip'; d.innerText = n;
+                d.onclick = function () { this.classList.toggle('selected'); }; waGrid.appendChild(d);
+            });
+
+            const brGrid = document.getElementById('breakNamesGrid'); brGrid.innerHTML = '';
+            employees.forEach(n => {
+                let d = document.createElement('div'); d.className = 'name-chip'; d.innerText = n;
+                d.onclick = function () {
+                    document.querySelectorAll('#breakNamesGrid .name-chip').forEach(el => el.classList.remove('selected'));
+                    this.classList.add('selected'); selectedBreakUser = n;
+                }; brGrid.appendChild(d);
+            });
+
+            const lvGrid = document.getElementById('leaveNamesGrid'); lvGrid.innerHTML = '';
+            employees.forEach(n => {
+                let d = document.createElement('div'); d.className = 'name-chip'; d.innerText = n;
+                d.onclick = function () {
+                    document.querySelectorAll('#leaveNamesGrid .name-chip').forEach(el => el.classList.remove('selected'));
+                    this.classList.add('selected'); selectedLeaveUser = n;
+                }; lvGrid.appendChild(d);
+            });
+        }
+
+        // --- Update Views ---
+        function updateWaUI(schedule, isDone) {
+            if (isDone) {
+                document.getElementById('waControls').style.display = 'none';
+                document.getElementById('waResults').style.display = 'block';
+                let h = '';
+                if (schedule) schedule.forEach(r => h += `<tr><td>${r.name}</td><td>${r.time}</td></tr>`);
+                document.getElementById('waTableBody').innerHTML = h;
+            } else {
+                document.getElementById('waControls').style.display = 'block';
+                document.getElementById('waResults').style.display = 'none';
+            }
+        }
+
+        function updateBreakUI(bookings) {
+            const wrapper = document.getElementById('breakSlots'); wrapper.innerHTML = '';
+            breakTimes.forEach(t => {
+                let bk = bookings[t.id] || [];
+                let full = bk.length >= 2;
+                let namesHtml = bk.map(n =>
+                    `<div><span class="booked-name">${n}</span> 
+                     <span class="delete-x" onclick="adminDeleteBreak(${t.id},'${n}')">✕</span></div>`
+                ).join('');
+                wrapper.innerHTML += `
+                <div class="slot-card ${full ? 'full' : ''}">
+                    <span class="slot-time">${t.time}</span>
+                    <div style="min-height:30px; margin-bottom:10px;">${namesHtml}</div>
+                    <button class="book-btn-small" ${full ? 'disabled' : ''} onclick="bookBreak(${t.id})">
+                        ${full ? 'مكتمل' : 'حجز الآن'}
+                    </button>
+                </div>`;
+            });
+        }
+
+        function updateLeavesUI(leaves) {
+            const container = document.getElementById('leavesList'); container.innerHTML = '';
+            let list = [];
+            for (let k in leaves) list.push({ id: k, ...leaves[k] });
+            list.sort((a, b) => new Date(a.date) - new Date(b.date));
+            if (list.length === 0) { container.innerHTML = '<div style="text-align:center; color:#888;">لا توجد إجازات محجوزة</div>'; return; }
+            list.forEach(item => {
+                const delBtn = `<button class="delete-x" onclick="adminDeleteLeave('${item.id}')" style="background:none; border:none; font-size:1.2rem;">✕</button>`;
+                container.innerHTML += `
+                <div class="leave-item">
+                    <div class="leave-info">
+                        <span class="leave-name">👤 ${item.name}</span>
+                        <span class="leave-date">📅 ${item.date} (${item.dayName || ''})</span>
+                    </div>
+                    ${delBtn}
+                </div>`;
+            });
+        }
+
+        function renderCycle(schedule) {
+            const display = document.getElementById('cycleDisplay');
+            const btn = document.getElementById('generateCycleBtn');
+            const tbody = document.getElementById('cycleTableBody');
+            if (!schedule || schedule.length === 0) { display.style.display = 'none'; btn.style.display = 'block'; return; }
+            display.style.display = 'block'; btn.style.display = 'none'; tbody.innerHTML = '';
+            const todayStr = new Date().toISOString().split('T')[0];
+            schedule.forEach(row => {
+                const isToday = row.fullDate === todayStr;
+                tbody.innerHTML += `
+                    <tr class="${isToday ? 'today-row' : ''}">
+                        <td><div style="font-weight:bold;">${row.dayName}</div><div style="font-size:0.8rem; opacity:0.7;">${row.dateDisplay}</div></td>
+                        <td><span class="tag tag-t1">${row.task1}</span></td>
+                        <td><span class="tag tag-t2">${row.task2}</span></td>
+                        <td><span class="tag" style="color:#aaa;">${row.backup}</span></td>
+                    </tr>
+                `;
+            });
+        }
+
+        window.generateCycle = function () {
+            const N = employees.length;
+            const leaves = window.currentData?.leaves || {};
+            let schedule = [];
+            let dateIterator = new Date();
+            const dayNames = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+
+            for (let i = 0; i < N; i++) {
+                let d = new Date(dateIterator); d.setDate(dateIterator.getDate() + i);
+                schedule.push({
+                    dateObj: d, fullDate: d.toISOString().split('T')[0], dayIndex: d.getDay(),
+                    dayName: dayNames[d.getDay()], dateDisplay: `${d.getDate()}/${d.getMonth() + 1}`,
+                    task1: null, task2: null, backup: null
+                });
+            }
+
+            const isAvailable = (name, dateStr, dayIdx) => {
+                if (offDays[name] && offDays[name].includes(dayIdx)) return false;
+                for (let k in leaves) { if (leaves[k].date === dateStr && leaves[k].name === name) return false; }
+                return true;
+            };
+
+            let pool1 = [...employees]; pool1.sort(() => Math.random() - 0.5);
+            if (!solveSchedule(schedule, pool1, 'task1', isAvailable)) return alert("تعذر إنشاء جدول (Escalation).");
+
+            let pool2 = [...employees]; pool2 = pool2.reverse();
+            const isAvailableForT2 = (name, dateStr, dayIdx, dayObj) => { if (dayObj.task1 === name) return false; return isAvailable(name, dateStr, dayIdx); };
+            if (!solveSchedule(schedule, pool2, 'task2', isAvailableForT2)) return alert("تعذر توزيع Contract Feedback.");
+
+            let poolBk = [...employees]; poolBk.sort(() => Math.random() - 0.5);
+            const isAvailableForBk = (name, dateStr, dayIdx, dayObj) => { if (dayObj.task1 === name || dayObj.task2 === name) return false; return isAvailable(name, dateStr, dayIdx); };
+            solveSchedule(schedule, poolBk, 'backup', isAvailableForBk);
+
+            window.update('root', { cycleSchedule: schedule, cycleTimestamp: Date.now() });
+        }
+
+        function solveSchedule(schedule, pool, field, constraintFn) {
+            for (let i = 0; i < schedule.length; i++) {
+                let person = pool[i]; let day = schedule[i];
+                if (constraintFn(person, day.fullDate, day.dayIndex, day)) { day[field] = person; continue; }
+                let swapped = false;
+                for (let j = i + 1; j < schedule.length; j++) {
+                    let candidate = pool[j];
+                    if (constraintFn(candidate, day.fullDate, day.dayIndex, day)) {
+                        pool[i] = candidate; pool[j] = person; day[field] = candidate; swapped = true; break;
+                    }
+                }
+                if (!swapped) return false;
+            }
+            return true;
+        }
+
+        window.deleteCycle = function () {
+            if (window.isAdmin && confirm("حذف الدورة؟")) window.remove('cycleSchedule');
+        }
+
+        // --- ⏳ GLOBAL COUNTDOWN TO 7:30 AM ---
+        function startGlobalCountdown() {
+            const el1 = document.getElementById('waCountdown');
+            const el2 = document.getElementById('breakCountdown');
+
+            // Show countdowns always
+            el1.style.display = 'block';
+            el2.style.display = 'block';
+
+            setInterval(() => {
+                const now = getBaghdadDate();
+                let target = getBaghdadDate();
+                target.setHours(7, 30, 0, 0);
+
+                if (now >= target) {
+                    // Target is tomorrow
+                    target.setDate(target.getDate() + 1);
+                }
+
+                const diff = target - now;
+                const hrs = Math.floor(diff / (1000 * 60 * 60));
+                const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                const secs = Math.floor((diff % (1000 * 60)) / 1000);
+
+                const txt = `♻️ التصفير القادم: ${hrs}س ${mins}د ${secs}ث (7:30 ص)`;
+                el1.innerText = txt;
+                el2.innerText = txt;
+
+                // Trigger check if we just crossed the time
+                if (hrs === 0 && mins === 0 && secs === 0) {
+                    if (window.currentData) checkDailyReset(window.currentData);
+                }
+
+            }, 1000);
+        }
+
+        // --- Helper for Time ---
+        window.m2t = function (m) { let h = Math.floor(m / 60), mm = m % 60; if (h > 12) h -= 12; return `${h}:${mm.toString().padStart(2, '0')}`; }
+
+        // --- Actions ---
+        window.runLottery = function () {
+            let sel = Array.from(document.querySelectorAll('#waNamesGrid .name-chip.selected')).map(el => el.innerText);
+            if (sel.length === 0) return alert('اختر الحضور');
+            for (let i = sel.length - 1; i > 0; i--) { let j = Math.floor(Math.random() * (i + 1));[sel[i], sel[j]] = [sel[j], sel[i]]; }
+            let total = 510, per = Math.floor(total / sel.length), rem = total % sel.length, cur = 480;
+            let res = [];
+            sel.forEach(n => {
+                let d = per + (rem > 0 ? 1 : 0); if (rem > 0) rem--;
+                res.push({ name: n, time: `${m2t(cur)} - ${m2t(cur + d)}`, start: m2t(cur), end: m2t(cur + d), duration: d }); cur += d;
+            });
+            const updates = { '/waSchedule': res, '/waDone': true }; // Removed Timestamp logic
+            window.update('root', updates);
+        }
+
+        window.bookBreak = function (id) {
+            if (!selectedBreakUser) return alert('اختر اسمك أولاً');
+            let bookings = window.currentData?.breakBookings || {};
+            for (let k in bookings) if (bookings[k] && bookings[k].includes(selectedBreakUser)) return alert(`لديك حجز مسبق.`);
+            if (!bookings[id]) bookings[id] = [];
+            if (bookings[id].length < 2) {
+                bookings[id].push(selectedBreakUser);
+                const updates = { '/breakBookings': bookings }; // Removed Timestamp logic
+                window.update('root', updates);
+            }
+        }
+
+        window.bookLeave = function () {
+            const dateVal = document.getElementById('leaveDate').value;
+            if (!selectedLeaveUser) return alert('اختر اسمك');
+            if (!dateVal) return alert('اختر التاريخ');
+
+            const leaves = window.currentData?.leaves || {};
+
+            for (let key in leaves) {
+                if (leaves[key].date === dateVal) {
+                    return alert(`عذراً، هذا التاريخ (${dateVal}) تم حجزه مسبقاً.`);
+                }
+            }
+
+            const dateObj = new Date(dateVal);
+            const days = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+            const newRef = 'leaves/' + Date.now();
+            window.set(newRef, { name: selectedLeaveUser, date: dateVal, dayName: days[dateObj.getDay()] });
+            alert('تم التسجيل ✅');
+        }
+
+        // --- Admin Functions ---
+        window.adminDeleteBreak = function (slotId, name) {
+            if (window.isAdmin && confirm('حذف الحجز؟')) {
+                let bookings = window.currentData?.breakBookings || {};
+                if (bookings[slotId]) {
+                    bookings[slotId] = bookings[slotId].filter(n => n !== name);
+                    window.set('breakBookings', bookings);
+                }
+            }
+        }
+
+        window.adminDeleteLeave = function (leaveId) {
+            if (window.isAdmin && confirm('حذف الإجازة؟')) window.remove('leaves/' + leaveId);
+        }
+
+        window.adminResetWhatsApp = function () {
+            if (confirm('حذف الجدول؟')) window.update('root', { '/waSchedule': null, '/waDone': false });
+        }
+
+        window.switchTab = function (t) {
+            document.querySelectorAll('.section').forEach(el => el.classList.remove('active'));
+            document.getElementById(t).classList.add('active');
+            document.querySelectorAll('.segment-btn').forEach(el => el.classList.remove('active'));
+            event.target.classList.add('active');
+        }
+
+        window.copyTableToClipboard = function () {
+            let d = window.currentData?.waSchedule || [];
+            let t = `📅 جدول ${new Date().toLocaleDateString()}\n`;
+            d.forEach(r => t += `${r.name} (${r.duration}د): ${r.time}\n`);
+            navigator.clipboard.writeText(t).then(() => alert("تم النسخ"));
+        }
+
+        window.isAdmin = false;
+
+        window.toggleAdmin = async function () {
+            if (window.isAdmin) {
+                window.isAdmin = false;
+                document.body.classList.remove('admin-mode');
+                alert("تم الخروج من وضع المشرف");
+            } else {
+                const input = prompt("Admin Password:");
+                if (!input) return;
+
+                const { data, error } = await supabase
+                    .rpc('check_admin_pass', { pass_input: input });
+
+                if (error) {
+                    console.error(error);
+                    alert("حدث خطأ في الاتصال");
+                    return;
+                }
+
+                if (data === true) {
+                    window.isAdmin = true;
+                    document.body.classList.add('admin-mode');
+                    updateLeavesUI(window.currentData?.leaves || {});
+                    alert("✅ تم تفعيل وضع المشرف (Admin Mode)");
+                } else {
+                    alert("❌ كلمة السر خاطئة.");
+                }
+            }
+        }
+    </script>
+
+</body>
+
+</html>
