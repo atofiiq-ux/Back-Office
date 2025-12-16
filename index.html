@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="en">
 
 <head>
     <meta charset="UTF-8">
@@ -8,119 +8,55 @@
     <link href="https://fonts.googleapis.com/css2?family=Readex+Pro:wght@300;400;500;700&display=swap" rel="stylesheet">
 
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
     <script>
-        // --- إعدادات Supabase ---
         const SUPABASE_URL = 'https://mybrmochnnrefrzawpgy.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im15YnJtb2Nobm5yZWZyemF3cGd5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU3Mzk3MDgsImV4cCI6MjA4MTMxNTcwOH0.AVOaFIPAthz-GJgvmwj0IkQ9gPDWgUsxD4gKjVscQds';
-
-        // تهيئة العميل
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
         const TABLE_NAME = 'backoffice';
         const ROW_ID = 1;
 
-        // --- طبقة التوافق (Compatibility Layer) ---
         window.currentData = {};
-
-        window.ref = function (db, path) {
-            return path || '/';
-        };
 
         async function syncWithSupabase(updates) {
             let currentLocalData = JSON.parse(JSON.stringify(window.currentData));
-
             for (let path in updates) {
                 const keys = path.split('/').filter(k => k);
                 let ptr = currentLocalData;
-
                 for (let i = 0; i < keys.length - 1; i++) {
                     if (!ptr[keys[i]]) ptr[keys[i]] = {};
                     ptr = ptr[keys[i]];
                 }
-
                 const lastKey = keys[keys.length - 1];
-                if (updates[path] === null) {
-                    delete ptr[lastKey];
-                } else {
-                    ptr[lastKey] = updates[path];
-                }
+                if (updates[path] === null) delete ptr[lastKey];
+                else ptr[lastKey] = updates[path];
             }
-
             window.currentData = currentLocalData;
-
-            const { error } = await supabase
-                .from(TABLE_NAME)
-                .update({ data: window.currentData })
-                .eq('id', ROW_ID);
-
-            if (error) {
-                console.error("Error saving:", error);
-                window.logStatus(`Error: ${error.message}`, "red");
-            } else {
-                window.logStatus("● Data Synced Successfully", "green");
-            }
+            await supabase.from(TABLE_NAME).update({ data: window.currentData }).eq('id', ROW_ID);
+            window.logStatus("● Data Synced", "green");
         }
 
-        window.update = function (ref, updatesObj) {
-            syncWithSupabase(updatesObj);
-        };
-
-        window.set = function (ref, value) {
-            let updates = {};
-            updates[ref] = value;
-            return syncWithSupabase(updates);
-        };
-
-        window.remove = function (ref) {
-            let updates = {};
-            updates[ref] = null;
-            syncWithSupabase(updates);
-        };
-
-        window.get = async function (ref) {
-            return { val: () => window.currentData };
-        };
+        window.update = (ref, obj) => syncWithSupabase(obj);
+        window.set = (ref, val) => { let u = {}; u[ref] = val; return syncWithSupabase(u); };
+        window.remove = (ref) => { let u = {}; u[ref] = null; syncWithSupabase(u); };
+        window.get = async (ref) => ({ val: () => window.currentData });
 
         function startSupabaseListener(callback) {
-            supabase.from(TABLE_NAME).select('data').eq('id', ROW_ID).single()
-                .then(({ data, error }) => {
-                    if (error) {
-                        console.error("Error fetching initial data:", error);
-                        window.logStatus(`Connection Error: ${error.message}`, "red");
-                        return;
-                    }
-                    if (data && data.data) {
-                        window.currentData = data.data;
-                        callback({ val: () => data.data });
-                        window.logStatus("● System Online", "green");
-                    }
-                }).catch(e => {
-                    window.logStatus("Fatal Error: Check Console.", "red");
-                    console.error(e);
-                });
-
-            supabase.channel('public:backoffice')
-                .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: TABLE_NAME, filter: `id=eq.${ROW_ID}` }, payload => {
-                    const newData = payload.new.data;
-                    window.currentData = newData;
-                    callback({ val: () => newData });
-                    window.logStatus("● Realtime Update Received", "green");
-                })
-                .subscribe();
+            supabase.from(TABLE_NAME).select('data').eq('id', ROW_ID).single().then(({ data }) => {
+                if (data?.data) { window.currentData = data.data; callback({ val: () => data.data }); }
+            });
+            supabase.channel('public:backoffice').on('postgres_changes', { event: 'UPDATE', schema: 'public', table: TABLE_NAME, filter: `id=eq.${ROW_ID}` }, payload => {
+                window.currentData = payload.new.data; callback({ val: () => payload.new.data });
+            }).subscribe();
         }
+        window.onValue = (ref, cb) => startSupabaseListener(cb);
 
-        window.onValue = function (ref, callback) {
-            startSupabaseListener(callback);
-        };
-
-        // دالة عرض الحالة الجديدة (في الأعلى)
-        window.logStatus = function (msg, color = 'white') {
+        window.logStatus = function (msg, color) {
             const el = document.getElementById('status-badge');
             if (el) {
                 el.innerText = msg;
-                // ألوان نيون هادئة مناسبة للخلفية الداكنة
-                el.style.color = color === 'green' ? '#4ade80' : (color === 'red' ? '#ff5c5c' : '#aaaaaa');
-                el.style.textShadow = color === 'green' ? '0 0 10px rgba(74, 222, 128, 0.3)' : 'none';
+                el.style.color = color === 'green' ? '#4ade80' : '#ff5c5c';
             }
         };
     </script>
@@ -129,11 +65,10 @@
         :root {
             --bg-dark: #000000;
             --text-main: #ffffff;
-            --text-secondary: #e0e0e0;
-            --danger: #ff3b30;
-            --success: #34c759;
             --accent: #0a84ff;
             --purple: #bf5af2;
+            --success: #34c759;
+            --danger: #ff3b30;
         }
 
         body {
@@ -148,9 +83,10 @@
             padding: 20px;
             display: flex;
             justify-content: center;
-            align-items: flex-start;
             overflow-x: hidden;
             padding-bottom: 60px;
+            padding-top: 20px;
+            direction: ltr;
         }
 
         .container {
@@ -161,8 +97,7 @@
             border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 30px;
             padding: 40px;
-            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
-            margin-top: 30px;
+            margin-top: 10px;
         }
 
         header {
@@ -171,11 +106,18 @@
         }
 
         h1 {
-            margin: 0;
             font-weight: 700;
             font-size: 2.2rem;
-            color: #fff;
-            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+            margin: 0;
+        }
+
+        .live-clock {
+            font-size: 1.2rem;
+            color: #ffcc00;
+            font-weight: bold;
+            margin-top: 5px;
+            font-family: monospace;
+            text-shadow: 0 0 10px rgba(255, 204, 0, 0.4);
         }
 
         .date-badge {
@@ -186,18 +128,13 @@
             font-size: 0.9rem;
             color: #ddd;
             margin-top: 10px;
-            font-weight: 500;
-            border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
-        /* تنسيق مؤشر الحالة الجديد في الأعلى */
         .status-badge-top {
             display: block;
             font-size: 0.8rem;
             margin-top: 8px;
             color: #aaa;
-            font-weight: 300;
-            transition: color 0.3s ease;
         }
 
         .segmented-control {
@@ -208,8 +145,7 @@
             padding: 5px;
             border-radius: 18px;
             width: fit-content;
-            margin: 0 auto 35px auto;
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            margin: 0 auto 35px;
             gap: 5px;
         }
 
@@ -217,19 +153,17 @@
             padding: 10px 20px;
             border: none;
             background: transparent;
-            font-size: 0.95rem;
-            font-family: inherit;
-            font-weight: 500;
             color: rgba(255, 255, 255, 0.6);
             cursor: pointer;
             border-radius: 14px;
             transition: 0.3s;
+            font-family: inherit;
+            font-weight: 500;
         }
 
         .segment-btn.active {
             background: rgba(255, 255, 255, 0.15);
             color: #fff;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
             font-weight: 600;
         }
 
@@ -240,18 +174,6 @@
 
         .section.active {
             display: block;
-        }
-
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
         }
 
         .content-card {
@@ -266,16 +188,9 @@
             font-size: 1.4rem;
             margin-top: 0;
             margin-bottom: 20px;
-            color: #fff;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
             padding-bottom: 10px;
-        }
-
-        .hint-text {
-            color: rgba(255, 255, 255, 0.5);
-            font-size: 0.9rem;
             text-align: center;
-            margin-bottom: 15px;
         }
 
         .names-grid {
@@ -289,24 +204,17 @@
         .name-chip {
             padding: 10px 20px;
             background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(5px);
             border-radius: 14px;
             cursor: pointer;
-            font-weight: 500;
             transition: 0.2s;
-            color: rgba(255, 255, 255, 0.8);
             user-select: none;
-        }
-
-        .name-chip:hover {
-            background: rgba(255, 255, 255, 0.15);
+            font-family: sans-serif;
+            letter-spacing: 0.5px;
         }
 
         .name-chip.selected {
             background: var(--accent);
             color: white;
-            border-color: var(--accent);
             box-shadow: 0 0 15px rgba(10, 132, 255, 0.4);
         }
 
@@ -318,25 +226,30 @@
             border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 18px;
             font-size: 1.1rem;
-            font-weight: 600;
             cursor: pointer;
-            transition: 0.2s;
-            font-family: inherit;
             margin-top: 15px;
-        }
-
-        .black-btn:active {
-            transform: scale(0.98);
+            font-family: inherit;
+            font-weight: 600;
         }
 
         .btn-generate {
             background: linear-gradient(135deg, var(--purple), #5e35b1);
         }
 
+        .btn-excel {
+            background: linear-gradient(135deg, #2e7d32, #1b5e20);
+        }
+
         .btn-danger {
             background: rgba(255, 69, 58, 0.2);
             color: var(--danger);
             border-color: rgba(255, 69, 58, 0.3);
+        }
+
+        .btn-admin-action {
+            background: rgba(255, 255, 255, 0.1);
+            font-size: 0.9rem;
+            padding: 12px;
         }
 
         .glass-input {
@@ -346,51 +259,18 @@
             color: #fff;
             border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 18px;
-            font-size: 1rem;
-            font-weight: 500;
-            outline: none;
             text-align: center;
             font-family: inherit;
-            cursor: pointer;
+            font-size: 1.1rem;
         }
 
         .glass-input::-webkit-calendar-picker-indicator {
             filter: invert(1);
             cursor: pointer;
-        }
-
-        .selected-day-display {
-            text-align: center;
-            color: var(--accent);
-            margin-top: 10px;
-            font-weight: bold;
-            font-size: 1rem;
-        }
-
-        .result-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 15px;
-        }
-
-        .result-table th {
-            text-align: right;
-            padding: 15px;
-            color: rgba(255, 255, 255, 0.5);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .result-table td {
-            padding: 15px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            color: #fff;
-        }
-
-        .duration-badge {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 4px 10px;
-            border-radius: 8px;
-            font-size: 0.85rem;
+            width: 30px;
+            height: 30px;
+            opacity: 1;
+            margin-left: 10px;
         }
 
         .cycle-table {
@@ -398,14 +278,12 @@
             border-collapse: collapse;
             margin-top: 20px;
             font-size: 0.95rem;
+            text-align: left;
         }
 
         .cycle-table th {
             background: rgba(255, 255, 255, 0.1);
             padding: 12px;
-            color: #ddd;
-            text-align: center;
-            border-radius: 8px 8px 0 0;
         }
 
         .cycle-table td {
@@ -413,17 +291,15 @@
             padding: 12px;
             text-align: center;
             border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        }
-
-        .cycle-table tr:last-child td {
-            border-bottom: none;
+            font-family: sans-serif;
         }
 
         .today-row td {
-            background: rgba(50, 215, 75, 0.15) !important;
+            background: rgba(50, 215, 75, 0.25) !important;
             border: 1px solid var(--success);
-            color: #fff;
             font-weight: bold;
+            color: white !important;
+            box-shadow: 0 0 15px rgba(50, 215, 75, 0.3);
         }
 
         .tag {
@@ -452,26 +328,22 @@
 
         .slot-card {
             background: #ffffff;
-            border: 1px solid #ddd;
+            color: #000;
             padding: 20px;
             border-radius: 20px;
             text-align: center;
-            color: #000;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
         }
 
         .slot-card .slot-time {
             font-size: 1.3rem;
             font-weight: 800;
-            margin-bottom: 10px;
             display: block;
-            color: #000;
+            margin-bottom: 10px;
         }
 
         .slot-card.full {
             opacity: 0.6;
             background: #f0f0f0;
-            border-color: #ccc;
         }
 
         .book-btn-small {
@@ -479,33 +351,29 @@
             padding: 10px;
             border-radius: 12px;
             border: none;
-            margin-top: 10px;
             font-weight: 700;
             cursor: pointer;
             background: #e8f5e9;
             color: #2e7d32;
-            border: 1px solid #c8e6c9;
-        }
-
-        .book-btn-small:hover {
-            background: #c8e6c9;
+            margin-top: 10px;
         }
 
         .book-btn-small:disabled {
             background: #eee;
             color: #999;
-            border: 1px solid #ddd;
             cursor: not-allowed;
         }
 
         .booked-name {
             display: inline-block;
-            background: #333;
-            padding: 4px 10px;
-            border-radius: 8px;
-            font-size: 0.85rem;
-            margin: 2px;
+            background: var(--accent);
             color: #fff;
+            padding: 5px 12px;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            margin: 2px;
+            font-weight: bold;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
         }
 
         .leave-item {
@@ -516,49 +384,37 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border: 1px solid rgba(255, 255, 255, 0.05);
         }
 
-        .leave-info span {
-            display: block;
+        .leave-info {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
         }
 
         .leave-name {
             font-weight: bold;
             color: var(--accent);
+            font-family: sans-serif;
             font-size: 1.1rem;
         }
 
         .leave-date {
-            color: #ccc;
-            font-size: 0.9rem;
+            font-family: sans-serif;
+            font-size: 0.95rem;
+            color: #ddd;
         }
 
-        .countdown-timer {
-            text-align: center;
-            font-size: 1.1rem;
-            color: #ff9f0a;
-            font-weight: bold;
-            margin: 15px 0;
-            background: rgba(255, 159, 10, 0.1);
-            padding: 10px;
-            border-radius: 12px;
-            border: 1px solid rgba(255, 159, 10, 0.2);
-            display: none;
-        }
-
-        .admin-lock {
-            position: absolute;
-            top: 25px;
-            left: 25px;
+        .delete-x {
+            color: #ff3b30;
             cursor: pointer;
-            opacity: 0.3;
-            transition: 0.3s;
+            margin-left: 10px;
+            font-weight: bold;
+            display: none !important;
         }
 
-        .admin-lock:hover {
-            opacity: 1;
-            transform: scale(1.1);
+        body.admin-mode .delete-x {
+            display: inline-block !important;
         }
 
         .admin-controls {
@@ -572,26 +428,12 @@
             display: block;
         }
 
-        .delete-x {
-            color: #ff3b30;
+        .admin-lock {
+            position: absolute;
+            top: 25px;
+            left: 25px;
             cursor: pointer;
-            margin-right: 5px;
-            font-weight: bold;
-            padding: 0 5px;
-            display: none !important;
-        }
-
-        body.admin-mode .delete-x {
-            display: inline-block !important;
-        }
-
-        .delete-x:hover {
-            color: #ff0000;
-            transform: scale(1.2);
-        }
-
-        .copy-btn {
-            background: rgba(255, 255, 255, 0.1);
+            opacity: 0.3;
         }
 
         .copyright {
@@ -603,6 +445,85 @@
             font-size: 0.85rem;
             font-weight: 300;
         }
+
+        .controls-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .off-today-container {
+            text-align: center;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255, 59, 48, 0.3);
+            padding: 15px;
+            border-radius: 16px;
+            background: rgba(255, 59, 48, 0.05);
+        }
+
+        .off-today-title {
+            color: #ff453a;
+            font-weight: bold;
+            margin-bottom: 10px;
+            font-size: 1rem;
+        }
+
+        .off-tag {
+            background: #ff453a;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            margin: 3px;
+            display: inline-block;
+            font-family: sans-serif;
+            letter-spacing: 0.5px;
+        }
+
+        .wa-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .wa-name {
+            font-weight: bold;
+            color: #fff;
+            font-family: sans-serif;
+        }
+
+        .wa-time {
+            color: var(--accent);
+            font-family: monospace;
+            font-size: 1rem;
+        }
+
+        .time-note {
+            text-align: center;
+            color: #ffcc00;
+            background: rgba(255, 204, 0, 0.1);
+            padding: 10px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 204, 0, 0.2);
+            margin-bottom: 20px;
+            font-size: 0.9rem;
+            font-weight: bold;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
     </style>
 </head>
 
@@ -612,247 +533,348 @@
         <div class="admin-lock" onclick="toggleAdmin()">🔒</div>
         <header>
             <h1>Back Office Hub</h1>
-            <div class="date-badge" id="currentDate"></div>
+            <div id="liveClock" class="live-clock">Loading Clock...</div>
             <div id="status-badge" class="status-badge-top">Connecting...</div>
         </header>
 
         <div class="segmented-control">
-            <button class="segment-btn active" onclick="switchTab('whatsapp')">توزيع الواتساب</button>
-            <button class="segment-btn" onclick="switchTab('breaks')">حجز الاستراحة</button>
-            <button class="segment-btn" onclick="switchTab('leaves')">الإجازات</button>
-            <button class="segment-btn" onclick="switchTab('schedule')">جدول المهام</button>
+            <button class="segment-btn active" onclick="switchTab('whatsapp')">WhatsApp</button>
+            <button class="segment-btn" onclick="switchTab('breaks')">Lunch</button>
+            <button class="segment-btn" onclick="switchTab('leaves')">Leaves</button>
+            <button class="segment-btn" onclick="switchTab('schedule')">Tasks</button>
         </div>
 
         <div id="whatsapp" class="section active">
             <div id="waControls" class="content-card">
-                <h2>الحضور اليوم</h2>
-                <p class="hint-text">اختر الموظفين الحاضرين للقرعة</p>
-                <div class="names-grid" id="waNamesGrid"></div>
-                <button class="black-btn" onclick="runLottery()">🎲 إجراء القرعة وتوزيع الوقت</button>
-            </div>
-
-            <div id="waResults" class="content-card" style="display: none;">
-                <div style="text-align: center; color: var(--success); font-weight: 600; margin-bottom: 20px;">✓ تم
-                    اعتماد الجدول</div>
-                <div id="waCountdown" class="countdown-timer"></div>
-                <table class="result-table">
-                    <tbody id="waTableBody"></tbody>
-                </table>
-                <button class="black-btn copy-btn" onclick="copyTableToClipboard()">📋 نسخ النص</button>
-                <div class="admin-controls">
-                    <button class="black-btn btn-danger" onclick="adminResetWhatsApp()">⚠️ (Admin) حذف الجدول</button>
+                <div class="time-note">
+                    Lottery & Booking starts at 07:30 AM
                 </div>
+                <div id="waResetTimerDisplay"
+                    style="text-align:center; color:#ff9f0a; font-weight:bold; margin-bottom:15px; display:block;">
+                </div>
+                <div id="offDutySection" class="off-today-container" style="display:none;">
+                    <div class="off-today-title">🚫 Off Duty Today</div>
+                    <div id="offDutyList"></div>
+                </div>
+                <h2>Attendance</h2>
+                <div class="names-grid" id="waNamesGrid"></div>
+                <button class="black-btn" onclick="runLottery()">🎲 Start Lottery</button>
+            </div>
+            <div id="waResults" class="content-card" style="display: none;">
+                <div style="text-align: center; color: var(--success); font-weight: 600; margin-bottom: 10px;">✓
+                    Schedule Confirmed</div>
+                <div id="waTableBody" style="background: rgba(0,0,0,0.2); border-radius: 12px;"></div>
+                <button class="black-btn" style="background:rgba(255,255,255,0.1)" onclick="copyTableToClipboard()">📋
+                    Copy</button>
+                <div class="admin-controls"><button class="black-btn btn-danger" onclick="adminResetWhatsApp()">⚠️ Reset
+                        Schedule</button></div>
             </div>
         </div>
 
         <div id="breaks" class="section">
             <div class="content-card">
-                <h2>حجز الاستراحة</h2>
-                <p class="hint-text">اختر اسمك ثم الوقت (مسموح باختيار واحد)</p>
+                <h2>Lunch Booking</h2>
                 <div class="names-grid" id="breakNamesGrid"></div>
-                <div id="breakCountdown" class="countdown-timer"></div>
-                <hr style="margin: 25px 0; border: 0; border-top: 1px solid rgba(255,255,255,0.1);">
+                <div id="breakCountdown" style="text-align:center; color:#ff9f0a; margin:10px 0; font-weight:bold;">
+                </div>
+                <hr style="margin:20px 0; border:0; border-top:1px solid rgba(255,255,255,0.1);">
                 <div class="slots-wrapper" id="breakSlots"></div>
             </div>
         </div>
 
         <div id="leaves" class="section">
             <div class="content-card">
-                <h2>حجز إجازة</h2>
-                <p class="hint-text">اختر اسمك وتاريخ الإجازة</p>
+                <h2>Book a Leave</h2>
                 <div class="names-grid" id="leaveNamesGrid"></div>
-                <div style="margin-top: 20px;">
-                    <input type="date" id="leaveDate" class="glass-input">
-                    <div id="selectedDayDisplay" class="selected-day-display"></div>
-                </div>
-                <button class="black-btn" onclick="bookLeave()">📝 تسجيل الإجازة</button>
+                <input type="date" id="leaveDate" class="glass-input" style="margin-top:15px;">
+                <button class="black-btn" onclick="bookLeave()">📝 Submit</button>
             </div>
             <div class="content-card">
-                <h2>الإجازات القادمة</h2>
+                <h2>Upcoming Leaves</h2>
                 <div id="leavesList"></div>
             </div>
         </div>
 
         <div id="schedule" class="section">
             <div class="content-card">
-                <h2>جدول المهام</h2>
-                <p class="hint-text">يتم توزيع المهام تلقائياً مع مراعاة الأوفات والإجازات</p>
-                <p class="hint-text">Escalation = Joget , In progres , Waiting , Email</p>
-                <div id="cycleDisplay" style="display:none;">
-                    <div style="overflow-x:auto;">
-                        <table class="cycle-table">
-                            <thead>
-                                <tr>
-                                    <th>التاريخ</th>
-                                    <th>Escalation</th>
-                                    <th>Contract Feedback</th>
-                                    <th>Backup</th>
-                                </tr>
-                            </thead>
-                            <tbody id="cycleTableBody"></tbody>
-                        </table>
-                    </div>
+                <h2>Cycle Schedule</h2>
+                <p style="text-align:center; color:#888; font-size:0.9rem;">Auto-Generate or Upload Excel</p>
+                <div id="cycleDisplay" style="display:none; overflow-x:auto;">
+                    <table class="cycle-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Escalation</th>
+                                <th>Contract Feedback</th>
+                                <th>Backup</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cycleTableBody"></tbody>
+                    </table>
                 </div>
-
-                <div id="generateCycleBtn">
-                    <button class="black-btn btn-generate" onclick="generateCycle()">🔄 إنشاء دورة جديدة</button>
+                <div class="controls-grid">
+                    <button class="black-btn btn-generate" style="margin-top:0;" onclick="generateCycle()">🔄 Auto
+                        Generate</button>
+                    <button class="black-btn btn-excel" style="margin-top:0;"
+                        onclick="document.getElementById('excelInput').click()">📂 Upload Excel</button>
                 </div>
-
+                <input type="file" id="excelInput" accept=".xlsx, .xls" hidden onchange="handleExcelFile(this)">
                 <div class="admin-controls">
-                    <button class="black-btn btn-danger" onclick="deleteCycle()">⚠️ (Admin) حذف الدورة الحالية</button>
+                    <button class="black-btn btn-admin-action" onclick="updateOffDaysDB()">⚙️ Edit OffDays</button>
+                    <button class="black-btn btn-danger" onclick="deleteCycle()">⚠️ Delete Cycle</button>
+                    <button class="black-btn btn-danger" style="margin-top:10px; background: darkred;"
+                        onclick="adminNuke()">🔥 Hard Reset System</button>
                 </div>
             </div>
         </div>
 
-        <div class="copyright">
-            Mustafa Shakir © 2025
-        </div>
-
+        <div class="copyright"> Mustafa Shakir © 2025</div>
     </div>
 
     <script>
-        const employees = ["ريام", "نرجس", "زهراء", "سجاد", "الحسن", "عبدالله نجم", "عبدالله العبيدي", "ابراهيم", "محمد", "مصطفى", "شاكر"];
+        const employees = ["Muhammad", "Riyam", "Zahraa", "Ibrahem", "Hasan", "Mustafa", "Narjes", "Sajjad", "Shakir", "Abdullah Najm", "Abdullah Al-Obaidi"];
+        const defaultOffDays = { "Muhammad": [5, 6], "Riyam": [5, 6], "Hasan": [6, 0], "Mustafa": [0, 1], "Narjes": [0, 1], "Sajjad": [1, 2], "Shakir": [2, 3], "Abdullah Najm": [2, 3], "Abdullah Al-Obaidi": [3, 4], "Zahraa": [4, 5], "Ibrahem": [4, 5] };
+        let activeOffDays = defaultOffDays;
+        const breakTimes = [{ id: 1, time: "12:00 - 12:40" }, { id: 2, time: "12:40 - 01:20" }, { id: 3, time: "01:20 - 02:00" }, { id: 4, time: "02:00 - 02:40" }, { id: 5, time: "02:40 - 03:20" }, { id: 6, time: "03:20 - 04:00" }];
+        let selectedBreakUser = null, selectedLeaveUser = null;
 
-        const offDays = {
-            "ريام": [5, 6], "محمد": [5, 6],
-            "الحسن": [6, 0],
-            "مصطفى": [0, 1], "نرجس": [0, 1],
-            "سجاد": [1, 2],
-            "شاكر": [2, 3], "عبدالله نجم": [2, 3],
-            "زهراء": [4, 5], "ابراهيم": [4, 5],
-            "عبدالله العبيدي": []
-        };
-
-        const breakTimes = [
-            { id: 1, time: "12:00 - 12:40" }, { id: 2, time: "12:40 - 01:20" },
-            { id: 3, time: "01:20 - 02:00" }, { id: 4, time: "02:00 - 02:40" },
-            { id: 5, time: "02:40 - 03:20" }, { id: 6, time: "03:20 - 04:00" }
-        ];
-
-        let selectedBreakUser = null;
-        let selectedLeaveUser = null;
-        let waInterval = null;
-        let brInterval = null;
-
-        setTimeout(() => { initApp(); }, 500);
+        setTimeout(initApp, 500);
 
         function initApp() {
-            document.getElementById('currentDate').innerText = new Date().toLocaleDateString('ar-IQ');
+            updateLiveClock();
+            setInterval(updateLiveClock, 1000);
             setupUI();
 
-            document.getElementById('leaveDate').addEventListener('change', function () {
-                const val = this.value;
-                if (val) {
-                    const d = new Date(val);
-                    const days = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
-                    const dayName = days[d.getDay()];
-                    document.getElementById('selectedDayDisplay').innerText = `اليوم: ${dayName}`;
-                } else {
-                    document.getElementById('selectedDayDisplay').innerText = '';
-                }
-            });
-
-            // Start Supabase Listener (This replaces onValue)
             window.onValue('root', (snapshot) => {
                 const data = snapshot.val() || {};
-
-                checkDailyReset(data); // 🟢 CHECK RESET ON LOAD
-
+                if (data.offDays) activeOffDays = data.offDays; else activeOffDays = defaultOffDays;
+                renderOffDuty();
+                checkDailyReset(data);
                 updateWaUI(data.waSchedule, data.waDone);
                 updateBreakUI(data.breakBookings || {});
                 updateLeavesUI(data.leaves || {});
                 renderCycle(data.cycleSchedule);
-
-                window.currentData = data; // Keep local copy up to date
+                window.currentData = data;
                 window.logStatus("● System Online", "green");
             });
-
-            // Start Global Timer for 7:30 Check
             startGlobalCountdown();
         }
 
-        // --- ⏰ DAILY RESET LOGIC (7:30 AM Baghdad) ---
-        function getBaghdadDate() {
-            return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Baghdad" }));
+        function getBaghdadDate() { return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Baghdad" })); }
+
+        function updateLiveClock() {
+            const d = getBaghdadDate();
+            const day = String(d.getDate()).padStart(2, '0');
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const year = d.getFullYear();
+            let hrs = d.getHours();
+            const mins = String(d.getMinutes()).padStart(2, '0');
+            const secs = String(d.getSeconds()).padStart(2, '0');
+            const ampm = hrs >= 12 ? 'PM' : 'AM';
+            hrs = hrs % 12; hrs = hrs ? hrs : 12;
+            document.getElementById('liveClock').innerText = `${day}/${month}/${year} - ${hrs}:${mins}:${secs} ${ampm}`;
+        }
+
+        function getBaghdadDateString() {
+            const d = getBaghdadDate();
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        }
+
+        function renderCycle(schedule) {
+            const display = document.getElementById('cycleDisplay');
+            if (!schedule || schedule.length === 0) { display.style.display = 'none'; return; }
+            display.style.display = 'block';
+            const tbody = document.getElementById('cycleTableBody'); tbody.innerHTML = '';
+
+            const todayStr = getBaghdadDateString();
+
+            schedule.forEach(row => {
+                const isToday = (row.fullDate === todayStr);
+                const t1 = row.task1 || '-'; const t2 = row.task2 || '-'; const bk = row.backup || '-';
+                tbody.innerHTML += `
+                    <tr class="${isToday ? 'today-row' : ''}">
+                        <td>
+                            <div style="font-weight:bold">${row.dayName}</div>
+                            <div style="font-size:0.8rem;opacity:0.7">${row.dateDisplay}</div>
+                        </td>
+                        <td><span class="tag tag-t1">${t1}</span></td>
+                        <td><span class="tag tag-t2">${t2}</span></td>
+                        <td><span class="tag" style="color:#aaa">${bk}</span></td>
+                    </tr>`;
+            });
+        }
+
+        function renderOffDuty() {
+            const todayIdx = getBaghdadDate().getDay(); // 0=Sun
+            const container = document.getElementById('offDutySection');
+            const list = document.getElementById('offDutyList');
+            list.innerHTML = '';
+            let hasOff = false;
+            for (const [name, days] of Object.entries(activeOffDays)) {
+                if (days.includes(todayIdx)) {
+                    const span = document.createElement('span');
+                    span.className = 'off-tag';
+                    span.innerText = name;
+                    list.appendChild(span);
+                    hasOff = true;
+                }
+            }
+            container.style.display = hasOff ? 'block' : 'none';
+        }
+
+        function fixName(n) {
+            if (!n) return '-';
+            if (n === "Abid Allah" || n === "Abdullah") return "Abdullah Al-Obaidi";
+            if (n === "Abid Allah Najm") return "Abdullah Najm";
+            return n;
+        }
+
+        const monthMap = { "jan": 0, "january": 0, "feb": 1, "february": 1, "mar": 2, "march": 2, "apr": 3, "april": 3, "may": 4, "jun": 5, "june": 5, "jul": 6, "july": 6, "aug": 7, "august": 7, "sep": 8, "september": 8, "oct": 9, "october": 9, "nov": 10, "november": 10, "dec": 11, "december": 11 };
+
+        function parseExcelDate(val) {
+            if (!val) return null;
+            if (val instanceof Date) return new Date(val.getFullYear(), val.getMonth(), val.getDate(), 12, 0, 0);
+            if (typeof val === 'string') {
+                let str = val.trim().toLowerCase();
+                const parts = str.match(/^(\d{1,2})[-/\s]+([a-z]+)(?:[-/\s]+(\d{2,4}))?$/);
+                if (parts) {
+                    const d = parseInt(parts[1]); const mStr = parts[2]; const yStr = parts[3];
+                    let m = monthMap[mStr];
+                    if (m === undefined) return new Date(val);
+                    let y = new Date().getFullYear();
+                    if (yStr) { y = parseInt(yStr); if (y < 100) y += 2000; }
+                    return new Date(y, m, d, 12, 0, 0);
+                }
+                if (/^\d{4}-\d{2}-\d{2}$/.test(str)) { const [y, m, d] = str.split('-').map(Number); return new Date(y, m - 1, d, 12, 0, 0); }
+            }
+            return new Date(val);
+        }
+
+        window.handleExcelFile = function (input) {
+            const file = input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                let newSchedule = [];
+                const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+                for (let i = 1; i < jsonData.length; i++) {
+                    const row = jsonData[i];
+                    if (!row[1]) continue;
+
+                    let dateObj = parseExcelDate(row[1]);
+                    if (!dateObj || isNaN(dateObj.getTime())) continue;
+
+                    const y = dateObj.getFullYear();
+                    const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+                    const d = String(dateObj.getDate()).padStart(2, '0');
+                    const dateStr = `${y}-${m}-${d}`;
+                    const dayName = days[dateObj.getDay()];
+                    const dateDisplay = `${d}/${m}`;
+
+                    let t1, t2, bk;
+                    if (row[6] !== undefined) {
+                        t1 = row[6]; t2 = row[7]; bk = row[8];
+                    } else {
+                        t1 = row[2]; t2 = row[3]; bk = row[4];
+                    }
+
+                    t1 = t1 ? fixName(t1) : '-';
+                    t2 = t2 ? fixName(t2) : '-';
+                    bk = bk ? fixName(bk) : '-';
+
+                    newSchedule.push({ fullDate: dateStr, dayName: dayName, dateDisplay: dateDisplay, task1: t1, task2: t2, backup: bk });
+                }
+                if (newSchedule.length > 0 && confirm(`Read ${newSchedule.length} rows. Upload?`)) {
+                    window.update('root', { cycleSchedule: newSchedule, cycleTimestamp: Date.now() });
+                }
+                input.value = '';
+            };
+            reader.readAsArrayBuffer(file);
         }
 
         function checkDailyReset(data) {
             const now = getBaghdadDate();
+            let cycleDate = new Date(now); cycleDate.setHours(7, 30, 0, 0);
+            if (now < cycleDate) cycleDate.setDate(cycleDate.getDate() - 1);
+            const cycleDateString = cycleDate.toISOString().split('T')[0];
 
-            // Determine "Cycle Date" (The date of the current or last passed 7:30 AM)
-            let cycleDate = new Date(now);
-            cycleDate.setHours(7, 30, 0, 0);
-
-            // If current time is BEFORE 7:30 AM, the cycle belongs to Yesterday
-            if (now < cycleDate) {
-                cycleDate.setDate(cycleDate.getDate() - 1);
-            }
-
-            const cycleDateString = cycleDate.toISOString().split('T')[0]; // Format YYYY-MM-DD
-
-            // Check if stored data belongs to an OLD cycle
             if (data.lastResetDate !== cycleDateString) {
-                console.log("⏰ New Day Detected (7:30 AM passed). Resetting...");
-
-                const updates = {};
-                // Reset WA
-                updates['/waSchedule'] = null;
-                updates['/waDone'] = false;
-
-                // Reset Breaks
-                updates['/breakBookings'] = null;
-
-                // Update Reset Date
-                updates['/lastResetDate'] = cycleDateString;
-
-                // Cleanup Leaves (Past Dates)
+                const updates = { '/waSchedule': null, '/waDone': false, '/breakBookings': null, '/lastResetDate': cycleDateString };
                 if (data.leaves) {
-                    const todayStr = new Date().toISOString().split('T')[0];
-                    for (let key in data.leaves) {
-                        if (data.leaves[key].date < todayStr) {
-                            updates[`/leaves/${key}`] = null;
-                        }
-                    }
+                    const todayStr = getBaghdadDateString();
+                    for (let k in data.leaves) if (data.leaves[k].date < todayStr) updates[`/leaves/${k}`] = null;
                 }
-
                 window.update('root', updates);
             }
         }
 
-        // --- UI Setup ---
-        function setupUI() {
-            const waGrid = document.getElementById('waNamesGrid'); waGrid.innerHTML = '';
-            employees.forEach(n => {
-                let d = document.createElement('div'); d.className = 'name-chip'; d.innerText = n;
-                d.onclick = function () { this.classList.toggle('selected'); }; waGrid.appendChild(d);
-            });
+        window.generateCycle = function () {
+            const N = employees.length;
+            const leaves = window.currentData?.leaves || {};
+            let dateIterator = getBaghdadDate();
+            const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            let schedule = [];
 
-            const brGrid = document.getElementById('breakNamesGrid'); brGrid.innerHTML = '';
-            employees.forEach(n => {
-                let d = document.createElement('div'); d.className = 'name-chip'; d.innerText = n;
-                d.onclick = function () {
-                    document.querySelectorAll('#breakNamesGrid .name-chip').forEach(el => el.classList.remove('selected'));
-                    this.classList.add('selected'); selectedBreakUser = n;
-                }; brGrid.appendChild(d);
-            });
-
-            const lvGrid = document.getElementById('leaveNamesGrid'); lvGrid.innerHTML = '';
-            employees.forEach(n => {
-                let d = document.createElement('div'); d.className = 'name-chip'; d.innerText = n;
-                d.onclick = function () {
-                    document.querySelectorAll('#leaveNamesGrid .name-chip').forEach(el => el.classList.remove('selected'));
-                    this.classList.add('selected'); selectedLeaveUser = n;
-                }; lvGrid.appendChild(d);
-            });
+            for (let i = 0; i < N; i++) {
+                let d = new Date(dateIterator); d.setDate(dateIterator.getDate() + i);
+                const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0'); const dy = String(d.getDate()).padStart(2, '0');
+                schedule.push({ dateObj: d, fullDate: `${y}-${m}-${dy}`, dayIndex: d.getDay(), dayName: dayNames[d.getDay()], dateDisplay: `${dy}/${m}`, task1: null, task2: null, backup: null });
+            }
+            const isAv = (n, dStr, dIdx) => {
+                if (activeOffDays[n]?.includes(dIdx)) return false;
+                for (let k in leaves) { if (leaves[k].date === dStr && leaves[k].name === n) return false; }
+                return true;
+            };
+            let p1 = [...employees].sort(() => Math.random() - 0.5);
+            if (!solve(schedule, p1, 'task1', isAv)) return alert("Failed Task 1");
+            let p2 = [...employees].reverse();
+            if (!solve(schedule, p2, 'task2', (n, d, i, o) => o.task1 !== n && isAv(n, d, i))) return alert("Failed Task 2");
+            let p3 = [...employees].sort(() => Math.random() - 0.5);
+            solve(schedule, p3, 'backup', (n, d, i, o) => o.task1 !== n && o.task2 !== n && isAv(n, d, i));
+            window.update('root', { cycleSchedule: schedule, cycleTimestamp: Date.now() });
         }
 
-        // --- Update Views ---
+        function solve(sch, pool, f, check) {
+            for (let i = 0; i < sch.length; i++) {
+                let p = pool[i], d = sch[i];
+                if (check(p, d.fullDate, d.dayIndex, d)) { d[f] = p; continue; }
+                let swap = false;
+                for (let j = i + 1; j < sch.length; j++) {
+                    let cand = pool[j];
+                    if (check(cand, d.fullDate, d.dayIndex, d)) { pool[i] = cand; pool[j] = p; d[f] = cand; swap = true; break; }
+                }
+                if (!swap) return false;
+            }
+            return true;
+        }
+
+        function setupUI() {
+            const createChips = (id, onClick) => {
+                const div = document.getElementById(id); div.innerHTML = '';
+                employees.forEach(n => {
+                    let d = document.createElement('div'); d.className = 'name-chip'; d.innerText = n;
+                    d.onclick = function () {
+                        if (id !== 'waNamesGrid') div.querySelectorAll('.name-chip').forEach(x => x.classList.remove('selected'));
+                        this.classList.toggle('selected'); onClick(n);
+                    }; div.appendChild(d);
+                });
+            };
+            createChips('waNamesGrid', () => { });
+            createChips('breakNamesGrid', n => selectedBreakUser = n);
+            createChips('leaveNamesGrid', n => selectedLeaveUser = n);
+        }
+
         function updateWaUI(schedule, isDone) {
             if (isDone) {
                 document.getElementById('waControls').style.display = 'none';
                 document.getElementById('waResults').style.display = 'block';
                 let h = '';
-                if (schedule) schedule.forEach(r => h += `<tr><td>${r.name}</td><td>${r.time}</td></tr>`);
+                if (schedule) schedule.forEach(r => { h += `<div class="wa-row"><span class="wa-name">${r.name}</span><span class="wa-time">${r.time}</span></div>`; });
                 document.getElementById('waTableBody').innerHTML = h;
             } else {
                 document.getElementById('waControls').style.display = 'block';
@@ -865,267 +887,113 @@
             breakTimes.forEach(t => {
                 let bk = bookings[t.id] || [];
                 let full = bk.length >= 2;
-                let namesHtml = bk.map(n =>
-                    `<div><span class="booked-name">${n}</span> 
-                     <span class="delete-x" onclick="adminDeleteBreak(${t.id},'${n}')">✕</span></div>`
-                ).join('');
-                wrapper.innerHTML += `
-                <div class="slot-card ${full ? 'full' : ''}">
-                    <span class="slot-time">${t.time}</span>
-                    <div style="min-height:30px; margin-bottom:10px;">${namesHtml}</div>
-                    <button class="book-btn-small" ${full ? 'disabled' : ''} onclick="bookBreak(${t.id})">
-                        ${full ? 'مكتمل' : 'حجز الآن'}
-                    </button>
-                </div>`;
+                let names = bk.map(n => `<span class="booked-name">${n}<span class="delete-x" onclick="adminDeleteBreak(${t.id},'${n}')">✕</span></span>`).join('');
+                wrapper.innerHTML += `<div class="slot-card ${full ? 'full' : ''}"><span class="slot-time">${t.time}</span><div style="min-height:30px;margin-bottom:10px">${names}</div><button class="book-btn-small" ${full ? 'disabled' : ''} onclick="bookBreak(${t.id})">${full ? 'Full' : 'Book'}</button></div>`;
             });
         }
 
         function updateLeavesUI(leaves) {
-            const container = document.getElementById('leavesList'); container.innerHTML = '';
-            let list = [];
-            for (let k in leaves) list.push({ id: k, ...leaves[k] });
-            list.sort((a, b) => new Date(a.date) - new Date(b.date));
-            if (list.length === 0) { container.innerHTML = '<div style="text-align:center; color:#888;">لا توجد إجازات محجوزة</div>'; return; }
-            list.forEach(item => {
-                const delBtn = `<button class="delete-x" onclick="adminDeleteLeave('${item.id}')" style="background:none; border:none; font-size:1.2rem;">✕</button>`;
-                container.innerHTML += `
+            const list = document.getElementById('leavesList'); list.innerHTML = '';
+            let arr = Object.keys(leaves).map(k => ({ id: k, ...leaves[k] })).sort((a, b) => new Date(a.date) - new Date(b.date));
+            if (arr.length === 0) list.innerHTML = '<div style="text-align:center;color:#888">No Leaves</div>';
+
+            const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+            arr.forEach(l => {
+                // Calculate Day Name
+                const [y, m, d] = l.date.split('-').map(Number);
+                const dateObj = new Date(y, m - 1, d);
+                const dayName = days[dateObj.getDay()];
+
+                list.innerHTML += `
                 <div class="leave-item">
                     <div class="leave-info">
-                        <span class="leave-name">👤 ${item.name}</span>
-                        <span class="leave-date">📅 ${item.date} (${item.dayName || ''})</span>
+                        <span class="leave-name">👤 ${l.name}</span>
+                        <span class="leave-date" style="color:#ffcc00; margin-top:4px; display:block;">
+                            📅 ${l.date} <span style="color:#fff; opacity:0.7;">(${dayName})</span>
+                        </span>
                     </div>
-                    ${delBtn}
+                    <button class="delete-x" onclick="adminDeleteLeave('${l.id}')" style="background:none; border:none; font-size:1.2rem;">✕</button>
                 </div>`;
             });
         }
 
-        function renderCycle(schedule) {
-            const display = document.getElementById('cycleDisplay');
-            const btn = document.getElementById('generateCycleBtn');
-            const tbody = document.getElementById('cycleTableBody');
-            if (!schedule || schedule.length === 0) { display.style.display = 'none'; btn.style.display = 'block'; return; }
-            display.style.display = 'block'; btn.style.display = 'none'; tbody.innerHTML = '';
-            const todayStr = new Date().toISOString().split('T')[0];
-            schedule.forEach(row => {
-                const isToday = row.fullDate === todayStr;
-                tbody.innerHTML += `
-                    <tr class="${isToday ? 'today-row' : ''}">
-                        <td><div style="font-weight:bold;">${row.dayName}</div><div style="font-size:0.8rem; opacity:0.7;">${row.dateDisplay}</div></td>
-                        <td><span class="tag tag-t1">${row.task1}</span></td>
-                        <td><span class="tag tag-t2">${row.task2}</span></td>
-                        <td><span class="tag" style="color:#aaa;">${row.backup}</span></td>
-                    </tr>
-                `;
-            });
-        }
-
-        window.generateCycle = function () {
-            const N = employees.length;
-            const leaves = window.currentData?.leaves || {};
-            let schedule = [];
-            let dateIterator = new Date();
-            const dayNames = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
-
-            for (let i = 0; i < N; i++) {
-                let d = new Date(dateIterator); d.setDate(dateIterator.getDate() + i);
-                schedule.push({
-                    dateObj: d, fullDate: d.toISOString().split('T')[0], dayIndex: d.getDay(),
-                    dayName: dayNames[d.getDay()], dateDisplay: `${d.getDate()}/${d.getMonth() + 1}`,
-                    task1: null, task2: null, backup: null
-                });
-            }
-
-            const isAvailable = (name, dateStr, dayIdx) => {
-                if (offDays[name] && offDays[name].includes(dayIdx)) return false;
-                for (let k in leaves) { if (leaves[k].date === dateStr && leaves[k].name === name) return false; }
-                return true;
-            };
-
-            let pool1 = [...employees]; pool1.sort(() => Math.random() - 0.5);
-            if (!solveSchedule(schedule, pool1, 'task1', isAvailable)) return alert("تعذر إنشاء جدول (Escalation).");
-
-            let pool2 = [...employees]; pool2 = pool2.reverse();
-            const isAvailableForT2 = (name, dateStr, dayIdx, dayObj) => { if (dayObj.task1 === name) return false; return isAvailable(name, dateStr, dayIdx); };
-            if (!solveSchedule(schedule, pool2, 'task2', isAvailableForT2)) return alert("تعذر توزيع Contract Feedback.");
-
-            let poolBk = [...employees]; poolBk.sort(() => Math.random() - 0.5);
-            const isAvailableForBk = (name, dateStr, dayIdx, dayObj) => { if (dayObj.task1 === name || dayObj.task2 === name) return false; return isAvailable(name, dateStr, dayIdx); };
-            solveSchedule(schedule, poolBk, 'backup', isAvailableForBk);
-
-            window.update('root', { cycleSchedule: schedule, cycleTimestamp: Date.now() });
-        }
-
-        function solveSchedule(schedule, pool, field, constraintFn) {
-            for (let i = 0; i < schedule.length; i++) {
-                let person = pool[i]; let day = schedule[i];
-                if (constraintFn(person, day.fullDate, day.dayIndex, day)) { day[field] = person; continue; }
-                let swapped = false;
-                for (let j = i + 1; j < schedule.length; j++) {
-                    let candidate = pool[j];
-                    if (constraintFn(candidate, day.fullDate, day.dayIndex, day)) {
-                        pool[i] = candidate; pool[j] = person; day[field] = candidate; swapped = true; break;
-                    }
-                }
-                if (!swapped) return false;
-            }
-            return true;
-        }
-
-        window.deleteCycle = function () {
-            if (window.isAdmin && confirm("حذف الدورة؟")) window.remove('cycleSchedule');
-        }
-
-        // --- ⏳ GLOBAL COUNTDOWN TO 7:30 AM ---
-        function startGlobalCountdown() {
-            const el1 = document.getElementById('waCountdown');
-            const el2 = document.getElementById('breakCountdown');
-
-            // Show countdowns always
-            el1.style.display = 'block';
-            el2.style.display = 'block';
-
-            setInterval(() => {
-                const now = getBaghdadDate();
-                let target = getBaghdadDate();
-                target.setHours(7, 30, 0, 0);
-
-                if (now >= target) {
-                    // Target is tomorrow
-                    target.setDate(target.getDate() + 1);
-                }
-
-                const diff = target - now;
-                const hrs = Math.floor(diff / (1000 * 60 * 60));
-                const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-                const secs = Math.floor((diff % (1000 * 60)) / 1000);
-
-                const txt = `♻️ التصفير القادم: ${hrs}س ${mins}د ${secs}ث (7:30 ص)`;
-                el1.innerText = txt;
-                el2.innerText = txt;
-
-                // Trigger check if we just crossed the time
-                if (hrs === 0 && mins === 0 && secs === 0) {
-                    if (window.currentData) checkDailyReset(window.currentData);
-                }
-
-            }, 1000);
-        }
-
-        // --- Helper for Time ---
-        window.m2t = function (m) { let h = Math.floor(m / 60), mm = m % 60; if (h > 12) h -= 12; return `${h}:${mm.toString().padStart(2, '0')}`; }
-
-        // --- Actions ---
         window.runLottery = function () {
-            let sel = Array.from(document.querySelectorAll('#waNamesGrid .name-chip.selected')).map(el => el.innerText);
-            if (sel.length === 0) return alert('اختر الحضور');
+            let sel = Array.from(document.querySelectorAll('#waNamesGrid .name-chip.selected')).map(e => e.innerText);
+            if (sel.length < 2) return alert("Select 2+ employees");
             for (let i = sel.length - 1; i > 0; i--) { let j = Math.floor(Math.random() * (i + 1));[sel[i], sel[j]] = [sel[j], sel[i]]; }
-            let total = 510, per = Math.floor(total / sel.length), rem = total % sel.length, cur = 480;
-            let res = [];
+            let total = 510, start = 480, cur = start, res = [];
+            let per = Math.floor(total / sel.length), rem = total % sel.length;
             sel.forEach(n => {
                 let d = per + (rem > 0 ? 1 : 0); if (rem > 0) rem--;
-                res.push({ name: n, time: `${m2t(cur)} - ${m2t(cur + d)}`, start: m2t(cur), end: m2t(cur + d), duration: d }); cur += d;
+                res.push({ name: n, time: `${m2t(cur)} - ${m2t(cur + d)}` }); cur += d;
             });
-            const updates = { '/waSchedule': res, '/waDone': true }; // Removed Timestamp logic
-            window.update('root', updates);
+            window.update('root', { waSchedule: res, waDone: true });
         }
 
         window.bookBreak = function (id) {
-            if (!selectedBreakUser) return alert('اختر اسمك أولاً');
-            let bookings = window.currentData?.breakBookings || {};
-            for (let k in bookings) if (bookings[k] && bookings[k].includes(selectedBreakUser)) return alert(`لديك حجز مسبق.`);
-            if (!bookings[id]) bookings[id] = [];
-            if (bookings[id].length < 2) {
-                bookings[id].push(selectedBreakUser);
-                const updates = { '/breakBookings': bookings }; // Removed Timestamp logic
-                window.update('root', updates);
-            }
+            if (!selectedBreakUser) return alert("Select Name");
+            let b = window.currentData?.breakBookings || {};
+            for (let k in b) if (b[k]?.includes(selectedBreakUser)) return alert("Already Booked");
+            if (!b[id]) b[id] = []; if (b[id].length < 2) { b[id].push(selectedBreakUser); window.update('root', { breakBookings: b }); }
         }
 
         window.bookLeave = function () {
-            const dateVal = document.getElementById('leaveDate').value;
-            if (!selectedLeaveUser) return alert('اختر اسمك');
-            if (!dateVal) return alert('اختر التاريخ');
-
+            const d = document.getElementById('leaveDate').value;
+            if (!selectedLeaveUser || !d) return alert("Missing Info");
             const leaves = window.currentData?.leaves || {};
+            for (let k in leaves) { if (leaves[k].date === d) return alert(`Date ${d} is reserved.`); }
+            window.set('leaves/' + Date.now(), { name: selectedLeaveUser, date: d });
+            alert("Done");
+        }
 
-            for (let key in leaves) {
-                if (leaves[key].date === dateVal) {
-                    return alert(`عذراً، هذا التاريخ (${dateVal}) تم حجزه مسبقاً.`);
-                }
+        window.updateOffDaysDB = function () {
+            if (!window.isAdmin) return;
+            const currentJSON = JSON.stringify(activeOffDays, null, 2);
+            const newJSON = prompt("Edit OffDays JSON (0=Sun ... 6=Sat):", currentJSON);
+            if (newJSON) { try { window.update('root', { offDays: JSON.parse(newJSON) }); alert("Updated"); } catch (e) { alert("Invalid JSON"); } }
+        }
+
+        window.m2t = m => { let h = Math.floor(m / 60), mm = m % 60; let amp = h >= 12 ? 'PM' : 'AM'; if (h > 12) h -= 12; return `${h}:${mm.toString().padStart(2, '0')} ${amp}`; };
+        window.switchTab = t => { document.querySelectorAll('.section').forEach(e => e.classList.remove('active')); document.getElementById(t).classList.add('active'); document.querySelectorAll('.segment-btn').forEach(e => e.classList.remove('active')); event.target.classList.add('active'); };
+        window.copyTableToClipboard = () => { let d = window.currentData?.waSchedule || []; let t = d.map(r => `${r.name}: ${r.time}`).join('\n'); navigator.clipboard.writeText(t).then(() => alert("Copied")); };
+        window.deleteCycle = () => { if (window.isAdmin && confirm("Delete?")) window.remove('cycleSchedule'); };
+        window.adminDeleteBreak = (i, n) => { if (window.isAdmin && confirm("Delete?")) { let b = window.currentData.breakBookings; b[i] = b[i].filter(x => x !== n); window.set('breakBookings', b); } };
+        window.adminDeleteLeave = (id) => { if (window.isAdmin && confirm("Delete?")) window.remove('leaves/' + id); };
+        window.adminResetWhatsApp = () => { if (confirm("Reset?")) window.update('root', { waSchedule: null, waDone: false }); };
+
+        window.adminNuke = () => {
+            if (window.isAdmin && confirm("⚠️ RESET ALL DATA?")) {
+                window.update('root', { cycleSchedule: null, waSchedule: null, waDone: false, breakBookings: null, leaves: null });
+                alert("System Reset. Generate New Cycle.");
             }
+        };
 
-            const dateObj = new Date(dateVal);
-            const days = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
-            const newRef = 'leaves/' + Date.now();
-            window.set(newRef, { name: selectedLeaveUser, date: dateVal, dayName: days[dateObj.getDay()] });
-            alert('تم التسجيل ✅');
-        }
-
-        // --- Admin Functions ---
-        window.adminDeleteBreak = function (slotId, name) {
-            if (window.isAdmin && confirm('حذف الحجز؟')) {
-                let bookings = window.currentData?.breakBookings || {};
-                if (bookings[slotId]) {
-                    bookings[slotId] = bookings[slotId].filter(n => n !== name);
-                    window.set('breakBookings', bookings);
-                }
-            }
-        }
-
-        window.adminDeleteLeave = function (leaveId) {
-            if (window.isAdmin && confirm('حذف الإجازة؟')) window.remove('leaves/' + leaveId);
-        }
-
-        window.adminResetWhatsApp = function () {
-            if (confirm('حذف الجدول؟')) window.update('root', { '/waSchedule': null, '/waDone': false });
-        }
-
-        window.switchTab = function (t) {
-            document.querySelectorAll('.section').forEach(el => el.classList.remove('active'));
-            document.getElementById(t).classList.add('active');
-            document.querySelectorAll('.segment-btn').forEach(el => el.classList.remove('active'));
-            event.target.classList.add('active');
-        }
-
-        window.copyTableToClipboard = function () {
-            let d = window.currentData?.waSchedule || [];
-            let t = `📅 جدول ${new Date().toLocaleDateString()}\n`;
-            d.forEach(r => t += `${r.name} (${r.duration}د): ${r.time}\n`);
-            navigator.clipboard.writeText(t).then(() => alert("تم النسخ"));
+        function startGlobalCountdown() {
+            const el1 = document.getElementById('breakCountdown');
+            const el2 = document.getElementById('waResetTimerDisplay');
+            setInterval(() => {
+                const now = getBaghdadDate();
+                let target = getBaghdadDate(); target.setHours(7, 30, 0, 0);
+                if (now >= target) target.setDate(target.getDate() + 1);
+                const diff = target - now;
+                const h = Math.floor(diff / (1000 * 60 * 60));
+                const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                const txt = `♻️ Reset in: ${h}h ${m}m`;
+                if (el1) el1.innerText = txt;
+                if (el2) el2.innerText = txt;
+            }, 60000);
         }
 
         window.isAdmin = false;
-
-        window.toggleAdmin = async function () {
-            if (window.isAdmin) {
-                window.isAdmin = false;
-                document.body.classList.remove('admin-mode');
-                alert("تم الخروج من وضع المشرف");
-            } else {
-                const input = prompt("Admin Password:");
-                if (!input) return;
-
-                const { data, error } = await supabase
-                    .rpc('check_admin_pass', { pass_input: input });
-
-                if (error) {
-                    console.error(error);
-                    alert("حدث خطأ في الاتصال");
-                    return;
-                }
-
-                if (data === true) {
-                    window.isAdmin = true;
-                    document.body.classList.add('admin-mode');
-                    updateLeavesUI(window.currentData?.leaves || {});
-                    alert("✅ تم تفعيل وضع المشرف (Admin Mode)");
-                } else {
-                    alert("❌ كلمة السر خاطئة.");
-                }
-            }
+        window.toggleAdmin = async () => {
+            if (window.isAdmin) { window.isAdmin = false; document.body.classList.remove('admin-mode'); alert("Logged Out"); return; }
+            const p = prompt("Password:"); if (!p) return;
+            const { data } = await supabase.rpc('check_admin_pass', { pass_input: p });
+            if (data) { window.isAdmin = true; document.body.classList.add('admin-mode'); updateLeavesUI(window.currentData?.leaves || {}); alert("Admin Mode ON"); }
+            else alert("Error");
         }
     </script>
-
 </body>
 
 </html>
