@@ -13,7 +13,9 @@
     <script>
         const SUPABASE_URL = 'https://mybrmochnnrefrzawpgy.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im15YnJtb2Nobm5yZWZyemF3cGd5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU3Mzk3MDgsImV4cCI6MjA4MTMxNTcwOH0.AVOaFIPAthz-GJgvmwj0IkQ9gPDWgUsxD4gKjVscQds';
-        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        // قمنا بتغيير الاسم هنا لتفادي المشكلة
+        const sysDB = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
         const TABLE_NAME = 'backoffice';
         const ROW_ID = 1;
 
@@ -33,7 +35,8 @@
                 else ptr[lastKey] = updates[path];
             }
             window.currentData = currentLocalData;
-            await supabase.from(TABLE_NAME).update({ data: window.currentData }).eq('id', ROW_ID);
+            // استخدام الاسم الجديد sysDB
+            await sysDB.from(TABLE_NAME).update({ data: window.currentData }).eq('id', ROW_ID);
             window.logStatus("● Data Synced", "green");
         }
 
@@ -43,10 +46,13 @@
         window.get = async (ref) => ({ val: () => window.currentData });
 
         function startSupabaseListener(callback) {
-            supabase.from(TABLE_NAME).select('data').eq('id', ROW_ID).single().then(({ data }) => {
+            // استخدام الاسم الجديد sysDB
+            sysDB.from(TABLE_NAME).select('data').eq('id', ROW_ID).single().then(({ data, error }) => {
+                if (error) console.error("Supabase Load Error:", error);
                 if (data?.data) { window.currentData = data.data; callback({ val: () => data.data }); }
             });
-            supabase.channel('public:backoffice').on('postgres_changes', { event: 'UPDATE', schema: 'public', table: TABLE_NAME, filter: `id=eq.${ROW_ID}` }, payload => {
+            // استخدام الاسم الجديد sysDB
+            sysDB.channel('public:backoffice').on('postgres_changes', { event: 'UPDATE', schema: 'public', table: TABLE_NAME, filter: `id=eq.${ROW_ID}` }, payload => {
                 window.currentData = payload.new.data; callback({ val: () => payload.new.data });
             }).subscribe();
         }
