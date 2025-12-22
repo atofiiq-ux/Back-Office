@@ -11,16 +11,19 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
     <script>
+        // إعدادات الاتصال بقاعدة البيانات
         const SUPABASE_URL = 'https://mybrmochnnrefrzawpgy.supabase.co';
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im15YnJtb2Nobm5yZWZyemF3cGd5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU3Mzk3MDgsImV4cCI6MjA4MTMxNTcwOH0.AVOaFIPAthz-GJgvmwj0IkQ9gPDWgUsxD4gKjVscQds';
 
-        // قمنا بتغيير الاسم هنا لتفادي المشكلة
+        // 🛠️ هام: تم استخدام اسم sysDB بدلاً من supabase لمنع تضارب الأسماء
         const sysDB = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
         const TABLE_NAME = 'backoffice';
         const ROW_ID = 1;
 
         window.currentData = {};
 
+        // دالة المزامنة (إرسال البيانات)
         async function syncWithSupabase(updates) {
             let currentLocalData = JSON.parse(JSON.stringify(window.currentData));
             for (let path in updates) {
@@ -35,26 +38,31 @@
                 else ptr[lastKey] = updates[path];
             }
             window.currentData = currentLocalData;
-            // استخدام الاسم الجديد sysDB
+
+            // استخدام sysDB
             await sysDB.from(TABLE_NAME).update({ data: window.currentData }).eq('id', ROW_ID);
             window.logStatus("● Data Synced", "green");
         }
 
+        // دوال مساعدة
         window.update = (ref, obj) => syncWithSupabase(obj);
         window.set = (ref, val) => { let u = {}; u[ref] = val; return syncWithSupabase(u); };
         window.remove = (ref) => { let u = {}; u[ref] = null; syncWithSupabase(u); };
         window.get = async (ref) => ({ val: () => window.currentData });
 
+        // دالة الاستماع (جلب البيانات)
         function startSupabaseListener(callback) {
-            // استخدام الاسم الجديد sysDB
+            // جلب أولي
             sysDB.from(TABLE_NAME).select('data').eq('id', ROW_ID).single().then(({ data, error }) => {
-                if (error) console.error("Supabase Load Error:", error);
+                if (error) console.error("Load Error:", error);
                 if (data?.data) { window.currentData = data.data; callback({ val: () => data.data }); }
             });
-            // استخدام الاسم الجديد sysDB
+            // اشتراك لحظي
             sysDB.channel('public:backoffice').on('postgres_changes', { event: 'UPDATE', schema: 'public', table: TABLE_NAME, filter: `id=eq.${ROW_ID}` }, payload => {
                 window.currentData = payload.new.data; callback({ val: () => payload.new.data });
-            }).subscribe();
+            }).subscribe(status => {
+                if (status === 'SUBSCRIBED') window.logStatus("● System Online", "green");
+            });
         }
         window.onValue = (ref, cb) => startSupabaseListener(cb);
 
@@ -124,16 +132,6 @@
             margin-top: 5px;
             font-family: monospace;
             text-shadow: 0 0 10px rgba(255, 204, 0, 0.4);
-        }
-
-        .date-badge {
-            display: inline-block;
-            background: rgba(255, 255, 255, 0.1);
-            padding: 5px 20px;
-            border-radius: 50px;
-            font-size: 0.9rem;
-            color: #ddd;
-            margin-top: 10px;
         }
 
         .status-badge-top {
@@ -552,9 +550,7 @@
 
         <div id="whatsapp" class="section active">
             <div id="waControls" class="content-card">
-                <div class="time-note">
-                    Lottery & Booking starts at 07:30 AM
-                </div>
+                <div class="time-note">Lottery & Booking starts at 07:30 AM</div>
                 <div id="waResetTimerDisplay"
                     style="text-align:center; color:#ff9f0a; font-weight:bold; margin-bottom:15px; display:block;">
                 </div>
@@ -661,7 +657,6 @@
                 updateLeavesUI(data.leaves || {});
                 renderCycle(data.cycleSchedule);
                 window.currentData = data;
-                window.logStatus("● System Online", "green");
             });
             startGlobalCountdown();
         }
@@ -906,7 +901,6 @@
             const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
             arr.forEach(l => {
-                // Calculate Day Name
                 const [y, m, d] = l.date.split('-').map(Number);
                 const dateObj = new Date(y, m - 1, d);
                 const dayName = days[dateObj.getDay()];
@@ -992,12 +986,34 @@
         }
 
         window.isAdmin = false;
+
+        // 🛠️ دالة الأدمن المحدثة
         window.toggleAdmin = async () => {
-            if (window.isAdmin) { window.isAdmin = false; document.body.classList.remove('admin-mode'); alert("Logged Out"); return; }
+            if (window.isAdmin) {
+                window.isAdmin = false;
+                document.body.classList.remove('admin-mode');
+                alert("Logged Out");
+                return;
+            }
             const p = prompt("Password:"); if (!p) return;
-            const { data } = await supabase.rpc('check_admin_pass', { pass_input: p });
-            if (data) { window.isAdmin = true; document.body.classList.add('admin-mode'); updateLeavesUI(window.currentData?.leaves || {}); alert("Admin Mode ON"); }
-            else alert("Error");
+
+            // استخدام sysDB بدلاً من supabase
+            const { data, error } = await sysDB.rpc('check_admin_pass', { pass_input: p });
+
+            if (error) {
+                alert("Error: " + error.message);
+                console.error(error);
+                return;
+            }
+
+            if (data === true) {
+                window.isAdmin = true;
+                document.body.classList.add('admin-mode');
+                updateLeavesUI(window.currentData?.leaves || {});
+                alert("✅ Admin Mode ON");
+            } else {
+                alert("❌ Wrong Password");
+            }
         }
     </script>
 </body>
